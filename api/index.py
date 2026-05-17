@@ -5,22 +5,33 @@ import json, numpy as np, os
 
 app = FastAPI()
 
-# CORS fix — allow POST from any origin
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_methods=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
 )
 
-# Load the telemetry JSON (bundled in the repo)
 DATA_PATH = os.path.join(os.path.dirname(__file__), "q-vercel-latency.json")
 with open(DATA_PATH) as f:
     RAW = json.load(f)
 
+# Explicit OPTIONS handler so Vercel doesn't swallow the preflight
+@app.options("/")
+async def options_root():
+    return JSONResponse(
+        content={},
+        headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "*",
+        },
+    )
+
 @app.post("/")
 async def analytics(request: Request):
-    body = await request.json()
+    body      = await request.json()
     regions   = body.get("regions", [])
     threshold = body.get("threshold_ms", 0)
 
@@ -31,11 +42,15 @@ async def analytics(request: Request):
             result[region] = {}
             continue
         latencies = [r["latency_ms"] for r in rows]
-        uptimes   = [r["uptime_pct"] for r in rows]
+        uptimes   = [r["uptime_pct"]  for r in rows]
         result[region] = {
-            "avg_latency": round(float(np.mean(latencies)), 4),
+            "avg_latency": round(float(np.mean(latencies)),        4),
             "p95_latency": round(float(np.percentile(latencies, 95)), 4),
-            "avg_uptime":  round(float(np.mean(uptimes)), 4),
+            "avg_uptime":  round(float(np.mean(uptimes)),          4),
             "breaches":    int(sum(1 for l in latencies if l > threshold)),
         }
-    return JSONResponse(result)
+
+    return JSONResponse(
+        content=result,
+        headers={"Access-Control-Allow-Origin": "*"},
+    )
